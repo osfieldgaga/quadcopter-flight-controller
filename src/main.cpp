@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <Servo.h>
+
 
 #include <./mpu/mpu.hpp>
 #include <./pid/pid.hpp>
@@ -37,7 +37,6 @@ int val;        // variable to read the value from the analog pin
 
 float motorInput[4];
 
-Servo motor[NUMBER_OF_MOTORS];
 int motorPins[NUMBER_OF_MOTORS] = {D5, D6, D7, D8};
 int statusLED = D4;
 int statusTimer = 500; // blink every 500ms
@@ -74,6 +73,8 @@ void setup()
 
   delay(500); // give some time to the sensor to start
   configureMPU();
+
+  resetPID();
 }
 
 void loop()

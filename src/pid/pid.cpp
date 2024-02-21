@@ -129,6 +129,11 @@ void resetPID()
   prevItermRoll = 0;
   prevItermPitch = 0;
   prevItermYaw = 0;
+
+  prevErrorRollAngle = 0;
+  prevErrorPitchAngle = 0;
+  prevItermRollAngle = 0;
+  prevItermPitchAngle = 0;
 }
 
 void calculateErrors()

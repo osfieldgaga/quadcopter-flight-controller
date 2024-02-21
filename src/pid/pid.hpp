@@ -11,5 +11,6 @@ extern float inputRollAngle, inputPitchAngle, inputYawAngle;
 void calculateErrors();
 void PID_Controller_Rate();
 void PID_Controller_Angle();
+void resetPID();
 
 #endif
