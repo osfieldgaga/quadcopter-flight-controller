@@ -189,6 +189,7 @@ void loop()
       readReceiverRateMode();
       break;
     case ANGLE:
+    // commands set desired angles fo each axis
       readReceiverAngleMode();
       break;
     default:
@@ -206,7 +207,10 @@ void loop()
 
     calculateErrors();
 
-    PID_Controller(); // rate mode PID
+    if (flightMode == ANGLE)
+      PID_Controller_Angle();
+
+    PID_Controller_Rate();
 
     calculateMotorsInput();
 

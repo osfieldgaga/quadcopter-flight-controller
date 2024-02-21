@@ -5,13 +5,10 @@
 #include <./receiver/receiver.hpp>
 #include <./include/globals.hpp>
 
-
-
-float inputRoll, inputPitch, inputYaw;
-
 /* -------------------------------------------------------------------------- */
 /*                                 Rate mode                                 */
 /* -------------------------------------------------------------------------- */
+float inputRoll, inputPitch, inputYaw;
 
 float errorRoll, errorPitch, errorYaw;
 
@@ -36,6 +33,7 @@ float D_Yaw = 0;
 /* -------------------------------------------------------------------------- */
 /*                                 Angle mode                                 */
 /* -------------------------------------------------------------------------- */
+float inputRollAngle, inputPitchAngle, inputYawAngle;
 
 float errorRollAngle, errorPitchAngle;
 
@@ -43,7 +41,7 @@ float prevErrorRollAngle, prevErrorPitchAngle;
 
 float prevItermRollAngle, prevItermPitchAngle;
 
-float PIDOutput[3] = {0, 0, 0};
+float PIDOutputAngle[3] = {0, 0, 0};
 
 float P_Roll_Angle = 2;
 float P_Pitch_Angle = P_Roll_Angle;
@@ -74,31 +72,53 @@ void PIDEquation(float error, float P, float I, float D, float prevError, float 
   // return minMax(PID_out, -400, 400);
 }
 
-void PID_Roll () {
+void PID_Roll()
+{
   PIDEquation(errorRoll, P_Roll, I_Roll, D_Roll, prevErrorRoll, prevItermRoll);
   inputRoll = PIDOutput[0];
   prevErrorRoll = PIDOutput[1];
   prevItermRoll = PIDOutput[2];
 }
 
-void PID_Pitch () {
+void PID_Pitch()
+{
   PIDEquation(errorPitch, P_Pitch, I_Pitch, D_Pitch, prevErrorPitch, prevItermPitch);
   inputPitch = PIDOutput[0];
   prevErrorPitch = PIDOutput[1];
   prevItermPitch = PIDOutput[2];
 }
 
-void PID_Yaw () {
+void PID_Yaw()
+{
   PIDEquation(errorYaw, P_Yaw, I_Yaw, D_Yaw, prevErrorYaw, prevItermYaw);
   inputYaw = PIDOutput[0];
   prevErrorYaw = PIDOutput[1];
   prevItermYaw = PIDOutput[2];
 }
 
-void PID_Controller() {
-  PID_Roll ();
-  PID_Pitch ();
-  PID_Yaw ();
+void PID_Controller_Rate()
+{
+  PID_Roll();
+  PID_Pitch();
+  PID_Yaw();
+}
+
+void PID_Controller_Angle()
+{
+
+// roll
+  PIDEquation(errorRollAngle, P_Roll_Angle, I_Roll_Angle, D_Roll_Angle, prevErrorRollAngle, prevItermRollAngle);
+  desiredRoll = PIDOutputAngle[0];
+  prevErrorRollAngle = PIDOutput[1];
+  prevItermRollAngle = PIDOutput[2];
+
+// pitch
+  PIDEquation(errorPitchAngle, P_Pitch_Angle, I_Pitch_Angle, D_Pitch_Angle, prevErrorPitchAngle, prevItermPitchAngle);
+  desiredPitch = PIDOutputAngle[0];
+  prevErrorPitchAngle = PIDOutputAngle[1];
+  prevItermPitchAngle = PIDOutputAngle[2];
+
+  PID_Yaw();
 }
 
 void resetPID()
@@ -117,12 +137,10 @@ void calculateErrors()
   errorPitch = desiredPitch - gyro_rate[X]; // X axis is pitch
   errorYaw = desiredYaw - gyro_rate[Z];     // Z axis is yaw
 
-
-  errorRollAngle = desiredRollAngle - roll_angle;   // Y axis is roll
+  errorRollAngle = desiredRollAngle - roll_angle;    // Y axis is roll
   errorPitchAngle = desiredPitchAngle - pitch_angle; // X axis is pitch
-    // Z axis is yaw
+                                                     // Z axis is yaw
 }
-
 
 float calculateSetPoints(float current_measurement, float target)
 
