@@ -1,10 +1,12 @@
 #include <Arduino.h>
 #include <Servo.h>
-#include <LiquidCrystal.h>
 
-#define NUMBER_OF_MOTORS 4
-#define LOW_PWM 1000
-#define HIGH_PWM 20000
+#include <./mpu/mpu.hpp>
+#include <./pid/pid.hpp>
+#include <./include/config.hpp>
+#include <./include/globals.hpp>
+#include <./include/utils.hpp>
+#include <./receiver/receiver.hpp>
 
 enum States
 {
@@ -13,7 +15,14 @@ enum States
   STARTED = 2
 };
 
+enum FlightMode
+{
+  RATE = 0,
+  ANGLE = 1
+};
+
 int currentState;
+int flightMode;
 
 // // put function declarations here:
 void readControllerOverSerial();
@@ -21,14 +30,12 @@ void recvWithStartEndMarkers();
 void parseData();
 void setMotorSpeed(int motorID, float throttle);
 void setAllMotorsSpeed(float throttle);
+void calculateMotorsInput();
 
 int potpin = 0; // analog pin used to connect the potentiometer
 int val;        // variable to read the value from the analog pin
 
-Servo motor1;
-Servo motor2;
-Servo motor3;
-Servo motor4;
+float motorInput[4];
 
 Servo motor[NUMBER_OF_MOTORS];
 int motorPins[NUMBER_OF_MOTORS] = {D5, D6, D7, D8};
@@ -44,14 +51,6 @@ int stoppedNow = 0;
 int armedCommandsTimer = 3000;
 int armedNow = 0;
 
-// int rs = 7;
-// int en = 8;
-// int d4 = 9;
-// int d5 = 10;
-// int d6 = 11;
-// int d7 = 12;
-// LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
-
 const byte numChars = 32;
 char receivedChars[numChars];
 char tempChars[numChars]; // temporary array for use when parsing
@@ -65,27 +64,16 @@ void setup()
 {
   // put your setup code here, to run once:
   currentState = STOPPED;
+  flightMode = RATE;
   statusNow = millis();
   armedNow = millis();
   Serial.begin(9600);
 
   pinMode(statusLED, OUTPUT);
   digitalWrite(statusLED, HIGH);
-  
-  motor1.attach(D5, 1000, 20000);
-  motor2.attach(D6, 1000, 20000);
-  motor3.attach(D7, 1000, 20000);
-  motor4.attach(D8, 1000, 20000);
 
-  // int i = 0;
-
-  // for (i = 0; i < NUMBER_OF_MOTORS; i++)
-  // {
-  //   motor[i].attach(motorPins[i], LOW_PWM, HIGH_PWM);
-  // }
-
-  // pinMode(13, OUTPUT);
-  // lcd.begin(16, 2);
+  delay(500); // give some time to the sensor to start
+  configureMPU();
 }
 
 void loop()
@@ -113,7 +101,7 @@ void loop()
   case STOPPED:
     digitalWrite(statusLED, HIGH);
 
-/* --------------------- CHeck if arming command is sent -------------------- */
+    /* --------------------- CHeck if arming command is sent -------------------- */
     if (throttle <= 20)
     {
 
@@ -137,22 +125,13 @@ void loop()
       countingDown = false;
     }
 
-
     break;
 
-
-/* -------------------------------------------------------------------------- */
-/*                            Drone is armed and ON                           */
-/* -------------------------------------------------------------------------- */
+    /* -------------------------------------------------------------------------- */
+    /*                            Drone is armed and ON                           */
+    /* -------------------------------------------------------------------------- */
   case ARMED:
     // show data on LED or motors
-    motor1.write(0);
-    motor2.write(0);
-    motor3.write(0);
-    motor4.write(0);
-    // digitalWrite(statusLED, HIGH);
-    // digitalWrite(LED_BUILTIN, HIGH);
-    // setAllMotorsSpeed(0.1);
 
     if (millis() - statusNow > statusTimer)
     {
@@ -169,8 +148,7 @@ void loop()
       statusNow = millis();
     }
 
-
-/* -------------------- Check if starting command is sent ------------------- */
+    /* -------------------- Check if starting command is sent ------------------- */
 
     if (throttle >= 1000)
     {
@@ -194,9 +172,7 @@ void loop()
       countingDown = false;
     }
 
-
     break;
-
 
     /* -------------------------------------------------------------------------- */
     /*                               Drone is flying                              */
@@ -204,26 +180,79 @@ void loop()
   case STARTED:
 
     digitalWrite(statusLED, LOW);
-    // show data on LED or motors
-    motor1.write(map(throttle, 0, 1023, 0, 180));
-    motor2.write(map(throttle, 0, 1023, 0, 180));
-    motor3.write(map(throttle, 0, 1023, 0, 180));
-    motor4.write(map(throttle, 0, 1023, 0, 180));
 
-    // setAllMotorsSpeed(motorSpeed);
+    readSensor();
 
-    // // sow data on LCD
-    // lcd.print((int)motorSpeed);
-    // lcd.print(',');
-    // lcd.print((int)pitch);
-    // lcd.print(',');
-    // lcd.print((int)yaw);
-    // lcd.print(',');
-    // lcd.print((int)roll);
+    switch (flightMode)
+    {
+    case RATE:
+      readReceiverRateMode();
+      break;
+    case ANGLE:
+      readReceiverAngleMode();
+      break;
+    default:
+      break;
+    }
+
+    desiredRoll = 0.15 * (map(roll, 0, 1023, 1000, 2000) - 1500);
+    desiredPitch = 0.15 * (map(pitch, 0, 1023, 1000, 2000) - 1500);
+
+    inputThrottle = map(throttle, 0, 1023, 1000, 2000);
+    if (inputThrottle > 1800)
+      inputThrottle = 1800;
+
+    desiredYaw = 0.15 * (map(yaw, 0, 1023, 1000, 2000) - 1500);
+
+    calculateErrors();
+
+    PID_Controller(); // rate mode PID
+
+    calculateMotorsInput();
+
+    // angle mode
+
+    // calculateGyroAngles();
+    // measureAccelerometerAngles();
+    // filterAnglesKalman();
+
+    Serial.println("Commands:");
+    Serial.print("T: ");
+    Serial.print(inputThrottle);
+    Serial.print(", R: ");
+    Serial.print(desiredRoll);
+    Serial.print(", P: ");
+    Serial.print(desiredPitch);
+    Serial.print(", Y: ");
+    Serial.println(desiredYaw);
+    Serial.println();
+
+    Serial.println("Errors:");
+    Serial.print("R: ");
+    Serial.print(errorRoll);
+    Serial.print(", P: ");
+    Serial.print(errorPitch);
+    Serial.print(", Y: ");
+    Serial.print(errorYaw);
+
+    Serial.println("Motors:");
+    Serial.print("M1: ");
+    Serial.print(motorInput[0]);
+    Serial.print(", M2: ");
+    Serial.print(motorInput[1]);
+    Serial.print(", M3: ");
+    Serial.print(motorInput[2]);
+    Serial.print(", M4: ");
+    Serial.println(motorInput[3]);
+    Serial.println();
+
+    // Do nothing until sampling period is reached
+    while ((now = micros()) - loop_timer < period)
+      ;
+    loop_timer = now;
+
     break;
   }
-
-  delay(10);
 }
 
 //============
@@ -299,16 +328,33 @@ void parseData()
   }
 }
 
-void setMotorSpeed(int motorID, float throttle)
+void setMotorSpeed(int motorPin, float input)
 {
-  motor[motorID].write(map(throttle, -1, 1, 0, 180));
+  analogWriteFreq(250);
+  analogWriteResolution(12);
+
+  analogWrite(motorPin, input);
 }
 
-void setAllMotorsSpeed(float throttle)
+void calculateMotorsInput()
 {
+  motorInput[0] = 1.024 * (inputThrottle - inputRoll - inputPitch - inputYaw);
+  motorInput[1] = 1.024 * (inputThrottle - inputRoll + inputPitch + inputYaw);
+  motorInput[2] = 1.024 * (inputThrottle + inputRoll + inputPitch - inputYaw);
+  motorInput[3] = 1.024 * (inputThrottle + inputRoll - inputPitch + inputYaw);
+
+  // avoid overloading the motors by limiting it to 1999
+  // don't allow motors to stop mid flight by setting min throttle > 1000
+  int minThrottle = 1180;
+
+  motorInput[0] = minMax(motorInput[0], minThrottle, 1999);
+  motorInput[1] = minMax(motorInput[1], minThrottle, 1999);
+  motorInput[2] = minMax(motorInput[2], minThrottle, 1999);
+  motorInput[3] = minMax(motorInput[3], minThrottle, 1999);
+
   int i;
   for (i = 0; i < NUMBER_OF_MOTORS; i++)
   {
-    motor[i].write(map(throttle, -1, 1, 0, 180));
+    setMotorSpeed(motorPins[i], motorInput[i]);
   }
 }
